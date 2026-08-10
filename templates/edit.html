@@ -205,6 +205,13 @@ async function delMedia(mid){
     },
     body:JSON.stringify({csrf_token:document.getElementById('csrfToken').value})
   });
+  
+  if(r.status===401||r.status===403){
+    alert('登录已过期，请重新登录');
+    window.location='/login';
+    return;
+  }
+  
   const d=await r.json();
   if(d.success){const el=document.getElementById('media-'+mid);el.style.transition='opacity 0.3s';el.style.opacity='0';setTimeout(()=>el.remove(),300);}
   else alert('删除失败：'+(d.error||''));
@@ -215,8 +222,16 @@ async function save(){
   const btn=document.getElementById('saveBtn');btn.disabled=true;btn.textContent='保存中...';
   const r1=await fetch('/api/entries/'+eid,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':document.getElementById('csrfToken').value},
     body:JSON.stringify({csrf_token:document.getElementById('csrfToken').value,title:document.getElementById('title').value,content:document.getElementById('content').value,entry_date:document.getElementById('entryDate').value})});
+  
+  // Handle unauthorized response
+  if(r1.status===401||r1.status===403){
+    alert('登录已过期，请重新登录');
+    window.location='/login';
+    return;
+  }
+  
   const d1=await r1.json();
-  if(!d1.success){show('保存失败','err');btn.disabled=false;btn.textContent='保存修改';return;}
+  if(!d1.success){show('保存失败：'+(d1.error||''),'err');btn.disabled=false;btn.textContent='保存修改';return;}
   if(newFiles.length>0){
     const hasVideo=newFiles.some(f=>f.type.startsWith('video/')||f.name.endsWith('.webm'));
     if(hasVideo){pw.style.display='block';pb.style.width='0%';btn.textContent='上传中...';}
@@ -227,7 +242,15 @@ async function save(){
       const xhr=new XMLHttpRequest();xhr.open('POST','/api/entries/'+eid+'/media');
       xhr.upload.onprogress=function(e){if(e.lengthComputable&&hasVideo){const pct=Math.round(e.loaded/e.total*100);pb.style.width=pct+'%';btn.textContent='上传中 '+pct+'%';}};
       await new Promise((resolve,reject)=>{
-        xhr.onload=function(){if(xhr.status===200)resolve();else reject(new Error('上传失败'));};
+        xhr.onload=function(){
+          if(xhr.status===401||xhr.status===403){
+            alert('登录已过期，请重新登录');
+            window.location='/login';
+            reject();
+            return;
+          }
+          if(xhr.status===200)resolve();else reject(new Error('上传失败'));
+        };
         xhr.onerror=function(){reject(new Error('网络错误'));};xhr.timeout=600000;xhr.send(fd);
       });
     }catch(err){show(err.message,'err');btn.disabled=false;btn.textContent='保存修改';pw.style.display='none';return;}

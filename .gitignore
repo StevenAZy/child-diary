@@ -40,11 +40,13 @@ Thumbs.db
 .env
 .env.local
 .env.production
+.secret_key
 
 # Temporary files
 *.tmp
 *.bak
 *.cache
+DEPLOYMENT.md.bak
 
 # Test files
 .pytest_cache/

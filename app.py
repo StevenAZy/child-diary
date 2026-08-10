@@ -22,7 +22,32 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'uploads')
 app.config['DATABASE'] = os.path.join(BASE_DIR, 'diary.db')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
-app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32))
+
+def get_or_create_secret_key():
+    """Get secret key from environment or generate and persist one"""
+    env_key = os.environ.get('SECRET_KEY')
+    if env_key:
+        return env_key
+    
+    # Try to read from file
+    secret_file = os.path.join(BASE_DIR, '.secret_key')
+    try:
+        with open(secret_file, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        pass
+    
+    # Generate new key and save it
+    new_key = os.urandom(32).hex()
+    try:
+        with open(secret_file, 'w') as f:
+            f.write(new_key)
+        os.chmod(secret_file, 0o600)  # Only owner can read/write
+    except Exception:
+        pass
+    return new_key
+
+app.secret_key = get_or_create_secret_key()
 
 # Session configuration
 from datetime import timedelta
@@ -142,13 +167,171 @@ def sanitize_content(content):
     content = re.sub(r'on\w+\s*=\s*[^\s>]+', '', content, flags=re.IGNORECASE)
     return content
 
+def extract_image_date(file_path):
+    """Extract capture date from image EXIF data"""
+    if not HAS_PIL:
+        return None
+    
+    try:
+        img = Image.open(file_path)
+        
+        # Try to get EXIF data
+        exif_data = img._getexif()
+        if exif_data:
+            # EXIF tag 36867 is DateTimeOriginal (capture time)
+            # EXIF tag 306 is DateTime
+            for tag_id in [36867, 306, 36868]:
+                if tag_id in exif_data:
+                    date_str = exif_data[tag_id]
+                    # Parse date format: 'YYYY:MM:DD HH:MM:SS'
+                    try:
+                        dt = datetime.strptime(date_str, '%Y:%m:%d %H:%M:%S')
+                        return dt.strftime('%Y-%m-%d')
+                    except ValueError:
+                        continue
+        
+        # Fallback: try to get from filename if it contains date pattern
+        filename = os.path.basename(file_path)
+        import re
+        
+        # Look for patterns like IMG_20240101_123456 or 20240101_123456
+        date_match = re.search(r'(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])', filename)
+        if date_match:
+            year, month, day = date_match.groups()
+            return f'{year}-{month}-{day}'
+        
+        # Look for timestamp patterns like 155746885575_IMG_8430.jpg
+        # This could be a Unix timestamp in various formats
+        timestamp_match = re.match(r'(\d{10,13})_', filename)
+        if timestamp_match:
+            try:
+                ts_str = timestamp_match.group(1)
+                ts = int(ts_str)
+                
+                # Try different interpretations
+                for divisor in [1, 1000, 1000000]:
+                    try:
+                        dt = datetime.fromtimestamp(ts / divisor)
+                        # Only return if the date is reasonable (2000-2100)
+                        if 2000 <= dt.year <= 2100:
+                            return dt.strftime('%Y-%m-%d')
+                    except (ValueError, OSError, OverflowError):
+                        continue
+            except (ValueError, OSError):
+                pass
+        
+        # Final fallback: use file creation date
+        try:
+            # Get file creation date (birth time on macOS, change time on Linux)
+            stat = os.stat(file_path)
+            
+            # Try to get birth time (creation time)
+            creation_time = None
+            
+            # On macOS, st_birthtime is available
+            if hasattr(stat, 'st_birthtime'):
+                creation_time = stat.st_birthtime
+            else:
+                # On Linux, we need to use a different approach
+                # Try to get birth time from file system
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['stat', '-c', '%W', file_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip().isdigit():
+                        creation_time = int(result.stdout.strip())
+                except Exception:
+                    pass
+                
+                # Fall back to change time
+                if creation_time is None:
+                    creation_time = stat.st_ctime
+            
+            dt = datetime.fromtimestamp(creation_time)
+            # Only return if the date is reasonable (after 2020)
+            if dt.year >= 2020:
+                return dt.strftime('%Y-%m-%d')
+        except Exception:
+            pass
+        
+        return None
+    except Exception as e:
+        app.logger.error(f'Error extracting image date: {e}')
+        return None
+
+def extract_video_date(file_path):
+    """Extract creation date from video metadata using ffprobe"""
+    try:
+        # Use ffprobe to get video metadata
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', file_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            import json
+            metadata = json.loads(result.stdout)
+            
+            # Try to get creation_time from format tags
+            if 'format' in metadata and 'tags' in metadata['format']:
+                tags = metadata['format']['tags']
+                
+                # Try different tag names
+                for tag_name in ['creation_time', 'date', 'date_time']:
+                    if tag_name in tags:
+                        date_str = tags[tag_name]
+                        try:
+                            # Try ISO format: 2024-01-01T12:34:56.000000Z
+                            if 'T' in date_str:
+                                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                                return dt.strftime('%Y-%m-%d')
+                            # Try other formats
+                            for fmt in ['%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d']:
+                                try:
+                                    dt = datetime.strptime(date_str[:19], fmt)
+                                    return dt.strftime('%Y-%m-%d')
+                                except ValueError:
+                                    continue
+                        except Exception:
+                            continue
+        
+        # Fallback: try to get from filename
+        filename = os.path.basename(file_path)
+        import re
+        date_match = re.search(r'(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])', filename)
+        if date_match:
+            year, month, day = date_match.groups()
+            return f'{year}-{month}-{day}'
+        
+        return None
+    except Exception as e:
+        app.logger.error(f'Error extracting video date: {e}')
+        return None
+
+def extract_media_date(file_path, file_ext):
+    """Extract date from media file (image or video)"""
+    if file_ext in {'jpg', 'jpeg', 'png', 'gif', 'heic', 'heif'}:
+        return extract_image_date(file_path)
+    elif file_ext in {'mp4', 'mov', 'webm'}:
+        return extract_video_date(file_path)
+    return None
+
 def compress_image(src_path, max_size=1200, quality=80):
-    """Compress image on server side for faster loading"""
+    """Compress image on server side for faster loading, preserving EXIF data"""
     if not HAS_PIL:
         return src_path
     
     try:
         img = Image.open(src_path)
+        
+        # Preserve EXIF data
+        exif_data = img.info.get('exif')
         
         # Convert RGBA to RGB if needed
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -165,8 +348,11 @@ def compress_image(src_path, max_size=1200, quality=80):
             new_size = (int(width * ratio), int(height * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
         
-        # Save compressed version
-        img.save(src_path, 'JPEG', quality=quality, optimize=True)
+        # Save compressed version with EXIF data preserved
+        save_kwargs = {'quality': quality, 'optimize': True}
+        if exif_data:
+            save_kwargs['exif'] = exif_data
+        img.save(src_path, 'JPEG', **save_kwargs)
         app.logger.info(f'Compressed image: {os.path.basename(src_path)} ({width}x{height} -> {img.size[0]}x{img.size[1]})')
         return src_path
     except Exception as e:
@@ -315,6 +501,8 @@ def save_uploaded_files(eid, files):
     os.makedirs(edir, exist_ok=True)
     db = get_db()
     count = 0
+    extracted_dates = []  # Store dates extracted from files
+    
     for f in files:
         if not f or not f.filename or not allowed_file(f.filename):
             continue
@@ -326,6 +514,12 @@ def save_uploaded_files(eid, files):
         new_fn = f"{ts}_{fn}"
         fpath = os.path.join(edir, new_fn)
         f.save(fpath)
+        
+        # Extract date from media file
+        media_date = extract_media_date(fpath, ext)
+        if media_date:
+            extracted_dates.append(media_date)
+            app.logger.info(f'Extracted date from {fn}: {media_date}')
         
         # Validate file content matches extension
         try:
@@ -378,7 +572,11 @@ def save_uploaded_files(eid, files):
                 threading.Thread(target=extract_thumb_async, args=(fpath,), daemon=True).start()
         count += 1
     db.commit(); db.close()
-    return count
+    
+    # Return the earliest date found, or None
+    if extracted_dates:
+        return count, min(extracted_dates)
+    return count, None
 
 @app.route('/')
 def timeline():
@@ -468,11 +666,56 @@ def create_entry():
     entry_date = request.form.get('entry_date','').strip()
     
     # Input validation
-    if not title or not content or not entry_date:
+    if not title or not content:
         return jsonify({'error':'缺少必填项'}), 400
     
     if len(title) > 200:
         return jsonify({'error':'标题过长（最多200字）'}), 400
+    
+    # Save files first to extract dates
+    files = request.files.getlist('media')
+    
+    # If no date provided, try to extract from files
+    if not entry_date and files:
+        # Create a temporary entry to save files
+        db = get_db()
+        try:
+            cur = db.execute('INSERT INTO entries (title,content,entry_date) VALUES (?,?,?)',
+                             (title, content, '2000-01-01'))  # Temporary date
+            eid = cur.lastrowid
+            db.commit()
+        except Exception as e:
+            db.close()
+            app.logger.error(f'Database error creating entry: {e}')
+            return jsonify({'error':'数据库错误'}), 500
+        finally:
+            db.close()
+        
+        # Save files and extract dates
+        count, extracted_date = save_uploaded_files(eid, files)
+        
+        # Use extracted date if available, otherwise use today
+        if extracted_date:
+            entry_date = extracted_date
+            app.logger.info(f'Using extracted date: {extracted_date}')
+        else:
+            entry_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Update the entry with the correct date
+        db = get_db()
+        try:
+            db.execute('UPDATE entries SET entry_date=? WHERE id=?', (entry_date, eid))
+            db.commit()
+        except Exception as e:
+            app.logger.error(f'Database error updating entry date: {e}')
+        finally:
+            db.close()
+        
+        return jsonify({'id':eid, 'success':True, 'entry_date':entry_date})
+    
+    # If date provided or no files, proceed normally
+    if not entry_date:
+        entry_date = datetime.now().strftime('%Y-%m-%d')
     
     # Validate date format
     try:
@@ -497,8 +740,64 @@ def create_entry():
     finally:
         db.close()
     
-    save_uploaded_files(eid, request.files.getlist('media'))
-    return jsonify({'id':eid, 'success':True})
+    count, extracted_date = save_uploaded_files(eid, files)
+    return jsonify({'id':eid, 'success':True, 'entry_date':entry_date})
+
+@app.route('/api/extract-date', methods=['POST'])
+def extract_date_from_files():
+    """Extract dates from uploaded files without creating an entry"""
+    if not session.get('auth'):
+        return jsonify({'error':'unauthorized'}), 401
+    
+    # CSRF validation
+    if not validate_csrf():
+        return jsonify({'error':'CSRF token 无效'}), 403
+    
+    files = request.files.getlist('media')
+    if not files:
+        return jsonify({'dates':[]})
+    
+    extracted_dates = []
+    for f in files:
+        if not f or not f.filename or not allowed_file(f.filename):
+            continue
+        
+        fn = secure_filename(f.filename)
+        if not fn:
+            continue
+        
+        ext = fn.rsplit('.',1)[1].lower() if '.' in fn else ''
+        
+        # Save file temporarily
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{ext}') as tmp:
+            f.save(tmp.name)
+            tmp_path = tmp.name
+        
+        try:
+            # Extract date
+            media_date = extract_media_date(tmp_path, ext)
+            if media_date:
+                extracted_dates.append({
+                    'filename': f.filename,
+                    'date': media_date
+                })
+        finally:
+            # Clean up temp file
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
+    
+    # Return the earliest date if available
+    if extracted_dates:
+        earliest_date = min(d['date'] for d in extracted_dates)
+        return jsonify({
+            'dates': extracted_dates,
+            'suggested_date': earliest_date
+        })
+    
+    return jsonify({'dates':[], 'suggested_date': None})
 
 @app.route('/api/entries/<int:eid>', methods=['PUT'])
 def update_entry(eid):

@@ -15,8 +15,10 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
 .header a:hover,.header a:active{color:#e8776f}
 .form-card{background:#fff;border-radius:16px;padding:30px;box-shadow:0 2px 16px rgba(0,0,0,0.04)}
 .form-group{margin-bottom:20px}
-.form-group label{display:block;font-weight:600;margin-bottom:6px;font-size:0.9em;color:#555}
+.form-group label{display:block;font-weight:600;margin-bottom:6px;font-size:0.9em;color:#555;text-align:left}
 .form-group input,.form-group textarea{width:100%;padding:14px 16px;border:1.5px solid #e5e5e5;border-radius:10px;font-size:16px;font-family:inherit;transition:border-color 0.2s}
+.date-input-wrapper{text-align:center}
+.form-group input[type=date]{text-align:center;-webkit-text-align:center;text-align-last:center;-moz-text-align-last:center;display:inline-block;width:auto;min-width:200px}
 .form-group input:focus,.form-group textarea:focus{outline:none;border-color:#e8776f}
 .form-group textarea{min-height:150px;resize:vertical}
 .file-upload{border:2px dashed #e5e5e5;border-radius:12px;padding:30px;text-align:center;cursor:pointer;transition:border-color 0.2s}
@@ -44,6 +46,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
   .form-card{padding:20px;border-radius:12px}
   .form-group{margin-bottom:16px}
   .form-group input,.form-group textarea{padding:12px 14px;font-size:16px}
+  .form-group input[type=date]{text-align:center;-webkit-text-align:center;text-align-last:center;-moz-text-align-last:center}
   .file-upload{padding:24px 16px}
   .preview-item{width:70px;height:70px}
   .btn{padding:14px;font-size:1em}
@@ -62,7 +65,9 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
       <input type="hidden" id="csrfToken" value="{{ csrf_token() }}">
       <div class="form-group">
         <label>日期</label>
-        <input type="date" id="entryDate" required>
+        <div class="date-input-wrapper">
+          <input type="date" id="entryDate" required>
+        </div>
       </div>
       <div class="form-group">
         <label>标题</label>
@@ -111,6 +116,13 @@ async function addAll(fList){
   if(processing)return;
   processing=true;
   const total=fList.length;let done=0;
+  
+  // Extract dates from ORIGINAL files BEFORE compression
+  const originalFiles = Array.from(fList);
+  if(originalFiles.length > 0){
+    await extractDatesFromOriginalFiles(originalFiles);
+  }
+  
   for(const f of fList){
     done++;
     if(f.type.startsWith('video/')&&f.size>100*1024*1024){
@@ -127,6 +139,63 @@ async function addAll(fList){
   st.textContent='';
   processing=false;
   render();
+}
+
+async function extractDatesFromOriginalFiles(originalFiles){
+  st.textContent='正在读取拍摄日期...';
+  
+  let earliestDate = null;
+  
+  for(const f of originalFiles){
+    if(!f.type.startsWith('image/')) continue;
+    
+    try {
+      // Method 1: Try to get date from file.lastModified
+      let date = null;
+      
+      if(f.lastModified) {
+        const d = new Date(f.lastModified);
+        if(d.getFullYear() >= 2020) {
+          date = d.getFullYear() + '-' + 
+                 String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+                 String(d.getDate()).padStart(2, '0');
+          console.log('Date from lastModified:', f.name, date);
+        }
+      }
+      
+      // Method 2: Try to extract from filename
+      if(!date) {
+        date = extractDateFromFilename(f.name);
+        if(date) console.log('Date from filename:', f.name, date);
+      }
+      
+      if(date && (!earliestDate || date < earliestDate)){
+        earliestDate = date;
+      }
+    } catch(err) {
+      console.log('Could not extract date from', f.name, err);
+    }
+  }
+  
+  if(earliestDate){
+    document.getElementById('entryDate').value = earliestDate;
+    show('已从照片读取拍摄日期: ' + earliestDate, 'ok');
+  } else {
+    console.log('No date extracted from any file');
+    st.textContent='未能读取日期';
+    setTimeout(() => st.textContent='', 2000);
+  }
+  
+  st.textContent='';
+}
+
+function extractDateFromFilename(filename){
+  // Try patterns like IMG_20240115_123456.jpg or 20240115_123456.jpg
+  const match = filename.match(/(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
+  if(match) {
+    return match[1] + '-' + match[2] + '-' + match[3];
+  }
+  return null;
 }
 
 function processImage(file){

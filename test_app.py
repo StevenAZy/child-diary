@@ -38,6 +38,10 @@ class BaseTestCase(TestCase):
         app.config['TESTING'] = True
         app.config['WTF_CSRF_ENABLED'] = False
         
+        # Clear rate limiting
+        from app import login_attempts
+        login_attempts.clear()
+        
         # Initialize database
         init_db()
         
@@ -54,21 +58,28 @@ class BaseTestCase(TestCase):
     
     def login(self, password='your-password'):
         """Helper to login."""
-        # First get a CSRF token
-        with self.app.session_transaction() as sess:
-            sess['csrf_token'] = 'test-csrf-token'
+        # First get the login page to establish session and get CSRF token
+        response = self.app.get('/login')
+        import re
+        match = re.search(b'name="csrf_token" value="([^"]+)"', response.data)
+        csrf_token = match.group(1).decode() if match else 'test-csrf-token'
         return self.app.post('/login', data={
             'password': password,
-            'csrf_token': 'test-csrf-token'
+            'csrf_token': csrf_token
         }, follow_redirects=True)
     
     def create_entry(self, title='Test Entry', content='Test content', entry_date='2024-01-01'):
         """Helper to create a diary entry."""
+        # Get CSRF token from admin page
+        response = self.app.get('/admin')
+        import re
+        match = re.search(b'id="csrfToken" value="([^"]+)"', response.data)
+        csrf_token = match.group(1).decode() if match else 'test-csrf-token'
         return self.app.post('/api/entries', data={
             'title': title,
             'content': content,
             'entry_date': entry_date,
-            'csrf_token': 'test-csrf-token'
+            'csrf_token': csrf_token
         }, content_type='multipart/form-data')
 
 class TestSanitization(BaseTestCase):
@@ -152,7 +163,7 @@ class TestRoutes(BaseTestCase):
     
     def test_login_failure(self):
         """Test failed login."""
-        response = self.login('wrong_password')
+        response = self.login('wrong_password123')
         self.assertEqual(response.status_code, 200)
         self.assertIn('密码错误', response.data.decode())
 
@@ -176,11 +187,17 @@ class TestAPI(BaseTestCase):
         """Test entry creation validation."""
         self.login()
         
+        # Get CSRF token from admin page
+        resp = self.app.get('/admin')
+        import re
+        match = re.search(b'id="csrfToken" value="([^"]+)"', resp.data)
+        csrf_token = match.group(1).decode() if match else 'test-csrf-token'
+        
         # Missing title
         response = self.app.post('/api/entries', data={
             'content': 'Test content',
             'entry_date': '2024-01-01',
-            'csrf_token': 'test-csrf-token'
+            'csrf_token': csrf_token
         }, content_type='multipart/form-data')
         self.assertEqual(response.status_code, 400)
         
@@ -189,7 +206,7 @@ class TestAPI(BaseTestCase):
             'title': 'Test',
             'content': 'Test content',
             'entry_date': 'invalid-date',
-            'csrf_token': 'test-csrf-token'
+            'csrf_token': csrf_token
         }, content_type='multipart/form-data')
         self.assertEqual(response.status_code, 400)
     
@@ -201,13 +218,19 @@ class TestAPI(BaseTestCase):
         response = self.create_entry()
         entry_id = json.loads(response.data)['id']
         
+        # Get CSRF token from admin page
+        resp = self.app.get('/admin')
+        import re
+        match = re.search(b'id="csrfToken" value="([^"]+)"', resp.data)
+        csrf_token = match.group(1).decode() if match else 'test-csrf-token'
+        
         # Update entry
         response = self.app.put(f'/api/entries/{entry_id}',
             data=json.dumps({
                 'title': 'Updated Title',
                 'content': 'Updated content',
                 'entry_date': '2024-01-02',
-                'csrf_token': 'test-csrf-token'
+                'csrf_token': csrf_token
             }),
             content_type='application/json')
         
@@ -222,9 +245,15 @@ class TestAPI(BaseTestCase):
         response = self.create_entry()
         entry_id = json.loads(response.data)['id']
         
+        # Get CSRF token from admin page
+        resp = self.app.get('/admin')
+        import re
+        match = re.search(b'id="csrfToken" value="([^"]+)"', resp.data)
+        csrf_token = match.group(1).decode() if match else 'test-csrf-token'
+        
         # Delete entry
         response = self.app.delete(f'/api/entries/{entry_id}',
-            data=json.dumps({'csrf_token': 'test-csrf-token'}),
+            data=json.dumps({'csrf_token': csrf_token}),
             content_type='application/json')
         data = json.loads(response.data)
         self.assertTrue(data['success'])

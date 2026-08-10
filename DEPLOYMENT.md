@@ -1,7 +1,7 @@
 # 李一禾成长日记 — 部署与迁移文档
 
 > 最后更新：2026-06-27
-> 域名：your-domain.com
+> 域名：请在部署时设置
 > 管理密码：请在部署时设置
 
 ---
@@ -379,9 +379,13 @@ print(f'导出 {len(entries)} 条日记, {len(media)} 个媒体文件')
 
 ### 修改管理密码
 
-编辑 `~/child-diary/app.py`：
-```python
-ADMIN_PASSWORD = '新密码'
+编辑 `~/child-diary/.env` 文件，设置新的密码哈希：
+```bash
+# 生成新密码的哈希
+python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('新密码'))"
+
+# 将生成的哈希添加到 .env 文件
+ADMIN_PASSWORD_HASH=生成的哈希值
 ```
 然后重启服务：`sudo systemctl restart child-diary`
 
