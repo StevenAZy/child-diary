@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<link rel=icon href=/static/favicon.svg type=image/svg+xml>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>小宝的成长日记</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;background:#faf8f5;color:#333;line-height:1.6;-webkit-tap-highlight-color:transparent}
+.nav{text-align:center;padding:12px 20px 0}
+.nav a{color:#999;font-size:0.85em;text-decoration:none;margin:0 8px;padding:4px 8px}
+.nav a:hover,.nav a:active{color:#e8776f}
+.header{text-align:center;padding:32px 20px 40px}
+.header h1{font-size:2.2em;color:#e8776f;font-weight:700;margin-bottom:8px}
+.header p{color:#999;font-size:0.95em}
+.timeline{position:relative;max-width:900px;margin:0 auto;padding:20px 20px 80px}
+.timeline::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,transparent,#e8776f 5%,#f4a261 95%,transparent);transform:translateX(-50%)}
+.tl-item{display:flex;align-items:flex-start;margin-bottom:48px;position:relative}
+.tl-item .side-l,.tl-item .side-r{width:calc(50% - 30px)}
+.tl-item .side-l{text-align:right;padding-right:24px}
+.tl-item .side-r{padding-left:24px}
+.tl-item .center{width:60px;display:flex;justify-content:center;padding-top:24px;position:relative;z-index:1}
+.dot{width:14px;height:14px;border-radius:50%;background:#e8776f;border:3px solid #faf8f5;box-shadow:0 0 0 2px #e8776f}
+.card{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 16px rgba(0,0,0,0.04);display:inline-block;text-align:left;max-width:100%;transition:transform 0.2s,box-shadow 0.2s;position:relative}
+.card:hover{transform:translateY(-2px);box-shadow:0 4px 20px rgba(0,0,0,0.08)}
+.card .date{display:inline-block;background:#e8776f;color:#fff;font-size:0.75em;font-weight:600;padding:3px 12px;border-radius:12px;margin-bottom:10px}
+.card h3{font-size:1.15em;font-weight:600;margin-bottom:8px;color:#333}
+.card p{font-size:0.9em;color:#666;line-height:1.7}
+.card-actions{position:absolute;top:10px;right:10px;display:flex;gap:4px;opacity:0;transition:opacity 0.2s}
+.card:hover .card-actions{opacity:1}
+.card-actions a,.card-actions button{width:26px;height:26px;border-radius:50%;border:none;font-size:14px;line-height:26px;text-align:center;cursor:pointer;text-decoration:none;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none}
+.edit-btn{background:rgba(100,100,200,0.1);color:#666}
+.edit-btn:hover{background:rgba(100,100,200,0.25);color:#333}
+.del-btn{background:rgba(232,119,111,0.1);color:#e8776f}
+.del-btn:hover{background:#e8776f;color:#fff}
+.media-area{border-radius:16px;overflow:hidden}
+.media-area img{width:100%;display:block;border-radius:16px}
+.media-area video{width:100%;display:block;border-radius:16px;background:#000}
+.media-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.media-grid img,.media-grid video{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px}
+.empty{text-align:center;padding:100px 20px;color:#bbb}
+.empty h2{font-size:1.5em;margin-bottom:12px}
+.empty a{color:#e8776f;text-decoration:none}
+
+@media(max-width:768px){
+  .header{padding:24px 16px 24px}
+  .header h1{font-size:1.6em}
+  .header p{font-size:0.85em}
+  .nav{padding:8px 16px 0}
+  .nav a{font-size:0.9em;padding:6px 12px}
+
+  .timeline{padding:12px 12px 60px}
+  .timeline::before{left:20px}
+
+  .tl-item{flex-direction:column;padding-left:44px;margin-bottom:28px;gap:12px}
+  .tl-item .side-l,.tl-item .side-r{width:100%;text-align:left;padding:0}
+  .tl-item .center{position:absolute;left:-24px;top:0;padding:0;width:auto}
+
+  .dot{width:10px;height:10px;border-width:2px;box-shadow:0 0 0 1.5px #e8776f}
+
+  .card{display:block;padding:16px;border-radius:12px;width:100%}
+  .card h3{font-size:1em;margin-bottom:6px}
+  .card p{font-size:0.85em;line-height:1.6}
+  .card .date{font-size:0.7em;padding:2px 10px;margin-bottom:8px}
+
+  .card-actions{opacity:1;gap:6px;top:8px;right:8px}
+  .card-actions a,.card-actions button{width:32px;height:32px;font-size:16px;border-radius:8px}
+
+  .media-area{border-radius:12px}
+  .media-area img,.media-area video{border-radius:12px}
+  .media-grid{grid-template-columns:1fr 1fr;gap:4px}
+  .media-grid img,.media-grid video{border-radius:8px}
+
+  .empty{padding:60px 16px}
+
+  .tl-item:nth-child(odd) .side-l{order:1}
+  .tl-item:nth-child(odd) .center{order:2}
+  .tl-item:nth-child(odd) .side-r{order:3}
+  .tl-item:nth-child(even) .side-r{order:1}
+  .tl-item:nth-child(even) .center{order:2}
+  .tl-item:nth-child(even) .side-l{order:3}
+}
+</style>
+</head>
+<body>
+<div class="nav">
+  {% if logged_in %}
+    <a href="/admin">写日记</a><span style="color:#ddd;margin:0 4px">·</span><a href="/logout">退出</a>
+  {% else %}
+    <a href="/login">管理</a>
+  {% endif %}
+</div>
+<div class="header">
+  <h1>小宝的成长日记</h1>
+  <p>记录每一个珍贵的瞬间</p>
+</div>
+<div class="timeline">
+{% if entries %}
+  {% for item in entries %}
+    {% set entry = item.entry %}
+    {% set media = item.media %}
+    {% if loop.index0 % 2 == 0 %}
+    <div class="tl-item">
+      <div class="side-l">
+        <div class="card">
+          {% if logged_in %}
+          <div class="card-actions">
+            <a href="/edit/{{ entry.id }}" class="edit-btn" title="编辑">✎</a>
+            <button class="del-btn" onclick="delEntry({{ entry.id }})" title="删除">×</button>
+          </div>
+          {% endif %}
+          <span class="date">{{ entry.entry_date }}</span>
+          <h3>{{ entry.title }}</h3>
+          <p>{{ entry.content | replace('\n', '<br>') | safe }}</p>
+        </div>
+      </div>
+      <div class="center"><div class="dot"></div></div>
+      <div class="side-r">
+        {% if media %}
+        <div class="media-area">
+          {% if media|length == 1 %}
+            {% set m = media[0] %}
+            {% if m.media_type == 'video' %}
+              {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
+            {% else %}
+              {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+            {% endif %}
+          {% else %}
+            <div class="media-grid">
+            {% for m in media %}
+              {% if m.media_type == 'video' %}
+                {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
+              {% else %}
+                {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+              {% endif %}
+            {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="tl-item">
+      <div class="side-l">
+        {% if media %}
+        <div class="media-area">
+          {% if media|length == 1 %}
+            {% set m = media[0] %}
+            {% if m.media_type == 'video' %}
+              {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
+            {% else %}
+              {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+            {% endif %}
+          {% else %}
+            <div class="media-grid">
+            {% for m in media %}
+              {% if m.media_type == 'video' %}
+                {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
+              {% else %}
+                {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+              {% endif %}
+            {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="center"><div class="dot"></div></div>
+      <div class="side-r">
+        <div class="card">
+          {% if logged_in %}
+          <div class="card-actions">
+            <a href="/edit/{{ entry.id }}" class="edit-btn" title="编辑">✎</a>
+            <button class="del-btn" onclick="delEntry({{ entry.id }})" title="删除">×</button>
+          </div>
+          {% endif %}
+          <span class="date">{{ entry.entry_date }}</span>
+          <h3>{{ entry.title }}</h3>
+          <p>{{ entry.content | replace('\n', '<br>') | safe }}</p>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <div class="empty">
+    <h2>还没有日记</h2>
+    <p>{% if logged_in %}去 <a href="/admin">写日记</a> 记录第一篇{% else %}暂无内容{% endif %}</p>
+  </div>
+{% endif %}
+</div>
+<script>
+async function delEntry(id){
+  if(!confirm('确定要删除这条日记吗？'))return;
+  const r=await fetch('/api/entries/'+id,{
+    method:'DELETE',
+    headers:{
+      'Content-Type':'application/json',
+      'X-CSRF-Token':'{{ csrf_token() }}'
+    }
+  });
+  const d=await r.json();
+  if(d.success)location.reload();
+  else alert('删除失败：'+(d.error||''));
+}
+</script>
+</body>
+</html>

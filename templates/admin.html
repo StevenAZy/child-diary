@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<link rel=icon href=/static/favicon.svg type=image/svg+xml>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>写日记</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;background:#faf8f5;color:#333;line-height:1.6;-webkit-tap-highlight-color:transparent}
+.container{max-width:600px;margin:0 auto;padding:40px 20px}
+.header{text-align:center;margin-bottom:30px}
+.header h1{font-size:1.8em;color:#e8776f;margin-bottom:8px}
+.header a{color:#999;font-size:0.85em;text-decoration:none;padding:4px 8px}
+.header a:hover,.header a:active{color:#e8776f}
+.form-card{background:#fff;border-radius:16px;padding:30px;box-shadow:0 2px 16px rgba(0,0,0,0.04)}
+.form-group{margin-bottom:20px}
+.form-group label{display:block;font-weight:600;margin-bottom:6px;font-size:0.9em;color:#555}
+.form-group input,.form-group textarea{width:100%;padding:14px 16px;border:1.5px solid #e5e5e5;border-radius:10px;font-size:16px;font-family:inherit;transition:border-color 0.2s}
+.form-group input:focus,.form-group textarea:focus{outline:none;border-color:#e8776f}
+.form-group textarea{min-height:150px;resize:vertical}
+.file-upload{border:2px dashed #e5e5e5;border-radius:12px;padding:30px;text-align:center;cursor:pointer;transition:border-color 0.2s}
+.file-upload:hover,.file-upload.dragover,.file-upload:active{border-color:#e8776f}
+.file-upload input{display:none}
+.file-upload p{color:#999;font-size:0.85em}
+.preview{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.preview-item{position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden}
+.preview-item img{width:100%;height:100%;object-fit:cover}
+.preview-item .vid{width:100%;height:100%;background:#f0e6e0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;flex-direction:column;gap:2px}
+.preview-item .rm{position:absolute;top:2px;right:2px;width:24px;height:24px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:50%;cursor:pointer;font-size:16px;line-height:24px;text-align:center}
+.btn{display:block;width:100%;padding:14px;background:#e8776f;color:#fff;border:none;border-radius:12px;font-size:1.05em;font-weight:600;cursor:pointer;transition:background 0.2s}
+.btn:hover,.btn:active{background:#d4665e}
+.btn:disabled{background:#ccc;cursor:not-allowed}
+.msg{text-align:center;padding:12px;border-radius:8px;margin-bottom:16px;display:none}
+.msg.ok{background:#e8f5e9;color:#2e7d32;display:block}
+.msg.err{background:#fce4ec;color:#c62828;display:block}
+.status{font-size:0.8em;color:#999;margin-top:4px}
+.progress{width:100%;height:4px;background:#e5e5e5;border-radius:2px;margin-top:8px;overflow:hidden;display:none}
+.progress .bar{height:100%;background:#e8776f;border-radius:2px;width:0%;transition:width 0.3s}
+@media(max-width:768px){
+  .container{padding:24px 16px}
+  .header{margin-bottom:20px}
+  .header h1{font-size:1.5em}
+  .form-card{padding:20px;border-radius:12px}
+  .form-group{margin-bottom:16px}
+  .form-group input,.form-group textarea{padding:12px 14px;font-size:16px}
+  .file-upload{padding:24px 16px}
+  .preview-item{width:70px;height:70px}
+  .btn{padding:14px;font-size:1em}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>写一篇新日记</h1>
+    <a href="/">&larr; 回到时间线</a>
+  </div>
+  <div id="msg" class="msg"></div>
+  <div class="form-card">
+    <form id="form">
+      <input type="hidden" id="csrfToken" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label>日期</label>
+        <input type="date" id="entryDate" required>
+      </div>
+      <div class="form-group">
+        <label>标题</label>
+        <input type="text" id="title" placeholder="如：宝宝会爬了！" required>
+      </div>
+      <div class="form-group">
+        <label>内容</label>
+        <textarea id="content" placeholder="今天发生了什么..." required></textarea>
+      </div>
+      <div class="form-group">
+        <label>图片 / 视频</label>
+        <div class="file-upload" id="dropZone">
+          <input type="file" id="fileInput" multiple accept="image/*,video/*,.heic,.heif">
+          <p style="font-size:1.5em;margin-bottom:4px">&#128247;</p>
+          <p>点击选择或拖拽文件到这里</p>
+          <p style="font-size:0.75em;margin-top:4px;color:#bbb">图片自动压缩，视频上传后服务端自动转换</p>
+        </div>
+        <div id="status" class="status"></div>
+        <div class="preview" id="preview"></div>
+        <div id="progressWrap" class="progress"><div id="progressBar" class="bar"></div></div>
+      </div>
+      <button type="submit" class="btn" id="submitBtn">发布</button>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById('entryDate').valueAsDate=new Date();
+const fi=document.getElementById('fileInput'),dz=document.getElementById('dropZone'),pv=document.getElementById('preview');
+const st=document.getElementById('status');
+const pw=document.getElementById('progressWrap'),pb=document.getElementById('progressBar');
+let files=[],processing=false;
+
+dz.addEventListener('click',()=>fi.click());
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');addAll(e.dataTransfer.files)});
+fi.addEventListener('change',()=>addAll(fi.files));
+
+function fmtSize(b){
+  if(b<1024)return b+'B';
+  if(b<1048576)return (b/1024).toFixed(0)+'KB';
+  return (b/1048576).toFixed(1)+'MB';
+}
+
+async function addAll(fList){
+  if(processing)return;
+  processing=true;
+  const total=fList.length;let done=0;
+  for(const f of fList){
+    done++;
+    if(f.type.startsWith('video/')&&f.size>100*1024*1024){
+      show('视频 '+f.name+' 太大('+fmtSize(f.size)+')，最大 100MB','err');continue;
+    }
+    if(f.type.startsWith('image/')){
+      st.textContent='压缩图片 '+done+'/'+total+'...';
+      const processed=await processImage(f).catch(()=>f);
+      files.push(processed);
+    }else{
+      files.push(f);
+    }
+  }
+  st.textContent='';
+  processing=false;
+  render();
+}
+
+function processImage(file){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.heic')||name.endsWith('.heif'))return compressHEIC(file);
+  if(file.type.startsWith('image/'))return compressImage(file);
+  return Promise.resolve(file);
+}
+
+function compressHEIC(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onerror=reject;
+    r.onload=e=>{const img=new Image();img.onerror=reject;img.onload=()=>resolve(canvasToFile(img,file.name.replace(/\.[^.]+$/i,'.jpg')));img.src=e.target.result;};
+    r.readAsDataURL(file);
+  });
+}
+function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onerror=reject;
+    r.onload=e=>{const img=new Image();img.onerror=reject;img.onload=()=>resolve(canvasToFile(img,file.name.replace(/\.[^.]+$/,'.jpg')));img.src=e.target.result;};
+    r.readAsDataURL(file);
+  });
+}
+function canvasToFile(img,name){
+  const MAX=2048;let w=img.width,h=img.height;
+  if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  c.getContext('2d').drawImage(img,0,0,w,h);
+  return new Promise(resolve=>{c.toBlob(b=>{if(b)resolve(new File([b],name,{type:'image/jpeg'}));else resolve(new File([img.src],name,{type:'image/jpeg'}));},'image/jpeg',0.82);});
+}
+
+function render(){
+  pv.innerHTML='';
+  files.forEach((f,i)=>{
+    const d=document.createElement('div');d.className='preview-item';
+    if(f.type.startsWith('video/')){
+      d.innerHTML='<div class="vid"><span>🎬</span><span>'+fmtSize(f.size)+'</span></div>';
+    }else{
+      const img=document.createElement('img');img.src=URL.createObjectURL(f);d.appendChild(img);
+    }
+    const rb=document.createElement('button');rb.className='rm';rb.textContent='\u00d7';
+    rb.onclick=e=>{e.stopPropagation();files.splice(i,1);render()};
+    d.appendChild(rb);pv.appendChild(d);
+  });
+}
+
+document.getElementById('form').addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(processing){show('请等待文件处理完成','err');return;}
+  const btn=document.getElementById('submitBtn');btn.disabled=true;
+  const totalSize=files.reduce((a,f)=>a+f.size,0);
+  const hasVideo=files.some(f=>f.type.startsWith('video/'));
+  pw.style.display='block';pb.style.width='0%';
+  btn.textContent='上传中...';
+
+  const fd=new FormData();
+  fd.append('csrf_token',document.getElementById('csrfToken').value);
+  fd.append('entry_date',document.getElementById('entryDate').value);
+  fd.append('title',document.getElementById('title').value);
+  fd.append('content',document.getElementById('content').value);
+  for(const f of files)fd.append('media',f);
+
+  try{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','/api/entries');
+    xhr.upload.onprogress=function(e){
+      if(e.lengthComputable){
+        const pct=Math.round(e.loaded/e.total*100);
+        pb.style.width=pct+'%';
+        const loaded=fmtSize(e.loaded),total=fmtSize(e.total);
+        btn.textContent='上传中 '+loaded+'/'+total+' ('+pct+'%)';
+      }
+    };
+    const result=await new Promise((resolve,reject)=>{
+      xhr.onload=function(){
+        if(xhr.status===401){window.location='/login';reject();return;}
+        try{resolve(JSON.parse(xhr.responseText));}catch(err){reject(new Error('服务器返回错误'));}
+      };
+      xhr.onerror=function(){reject(new Error('网络错误，请检查连接'))};
+      xhr.ontimeout=function(){reject(new Error('上传超时'))};
+      xhr.timeout=600000;
+      xhr.send(fd);
+    });
+    if(result.success){
+      let msg='发布成功！';
+      if(hasVideo)msg+=' 视频正在后台转换，稍后刷新即可播放。';
+      show(msg,'ok');
+      document.getElementById('form').reset();
+      document.getElementById('entryDate').valueAsDate=new Date();
+      files=[];render();
+    }else{show('发布失败：'+(result.error||''),'err')}
+  }catch(err){show(err.message,'err')}
+
+  btn.disabled=false;btn.textContent='发布';pw.style.display='none';
+});
+function show(t,c){const m=document.getElementById('msg');m.textContent=t;m.className='msg '+c;m.style.display='block';setTimeout(()=>m.style.display='none',5000)}
+</script>
+</body>
+</html>
