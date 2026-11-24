@@ -136,20 +136,23 @@ def cleanup_old_backups():
     backups = []
     for item in os.listdir(BACKUP_DIR):
         item_path = os.path.join(BACKUP_DIR, item)
-        if os.path.isdir(item_path) and item.startswith('child_diary_backup_'):
+        is_archive = item.endswith('.tar.gz')
+        if item.startswith('child_diary_backup_') and (os.path.isdir(item_path) or is_archive):
             backups.append((item, item_path))
     
-    # Sort by name (timestamp)
-    backups.sort(reverse=True)
+    # Sort by name (timestamp embedded in the name), newest first
+    backups.sort(key=lambda x: x[0], reverse=True)
     
     # Remove old backups
-    for i, (name, path) in enumerate(backups):
-        if i >= KEEP_BACKUPS:
-            try:
+    for name, path in backups[KEEP_BACKUPS:]:
+        try:
+            if os.path.isdir(path):
                 shutil.rmtree(path)
-                print(f"✓ Removed old backup: {name}")
-            except Exception as e:
-                print(f"✗ Failed to remove {name}: {e}")
+            else:
+                os.remove(path)
+            print(f"✓ Removed old backup: {name}")
+        except Exception as e:
+            print(f"✗ Failed to remove {name}: {e}")
 
 def create_backup_archive(backup_path):
     """Create a compressed archive of the backup."""
