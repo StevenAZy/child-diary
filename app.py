@@ -9,6 +9,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from dotenv import load_dotenv
+from markupsafe import Markup, escape
 
 try:
     from pillow_heif import register_heif_opener
@@ -79,6 +80,12 @@ def generate_csrf_token():
     return session['csrf_token']
 
 app.jinja_env.globals['csrf_token'] = generate_csrf_token
+
+def nl2br(value):
+    """Escape HTML and turn newlines into <br> for safe display."""
+    return Markup('<br>'.join(escape(value).split('\n')))
+
+app.jinja_env.filters['nl2br'] = nl2br
 
 def validate_csrf():
     """Validate CSRF token for POST/PUT/DELETE requests"""
@@ -329,36 +336,47 @@ def extract_media_date(file_path, file_ext):
     return None
 
 def compress_image(src_path, max_size=1200, quality=80):
-    """Compress image on server side for faster loading, preserving EXIF data"""
+    """Compress image on server side for faster loading.
+
+    PNG and JPEG are re-encoded in their own format; animated GIFs are left
+    untouched to preserve animation.
+    """
     if not HAS_PIL:
         return src_path
     
     try:
-        img = Image.open(src_path)
+        ext = os.path.splitext(src_path)[1].lower()
+        if ext == '.gif':
+            # Re-encoding would destroy animation; leave GIFs as-is.
+            return src_path
         
-        # Preserve EXIF data
+        img = Image.open(src_path)
         exif_data = img.info.get('exif')
         
-        # Convert RGBA to RGB if needed
-        if img.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-            img = background
-        
-        # Resize if larger than max_size
         width, height = img.size
         if width > max_size or height > max_size:
             ratio = min(max_size / width, max_size / height)
             new_size = (int(width * ratio), int(height * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
         
-        # Save compressed version with EXIF data preserved
-        save_kwargs = {'quality': quality, 'optimize': True}
-        if exif_data:
-            save_kwargs['exif'] = exif_data
-        img.save(src_path, 'JPEG', **save_kwargs)
+        if ext == '.png':
+            # Keep PNG transparency; convert palette images first.
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGBA')
+            img.save(src_path, 'PNG', optimize=True)
+        else:
+            # JPEG path (also the default for unknown image types).
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            save_kwargs = {'quality': quality, 'optimize': True}
+            if exif_data:
+                save_kwargs['exif'] = exif_data
+            img.save(src_path, 'JPEG', **save_kwargs)
+        
         app.logger.info(f'Compressed image: {os.path.basename(src_path)} ({width}x{height} -> {img.size[0]}x{img.size[1]})')
         return src_path
     except Exception as e:
@@ -615,8 +633,8 @@ def login():
         # Debug logging
         app.logger.info(f'Login attempt - Session token: {session_token[:20] if session_token else None}..., Form token: {form_token[:20] if form_token else None}...')
         
-        if session_token and form_token and session_token != form_token:
-            app.logger.warning(f'CSRF token mismatch from {ip}')
+        if not form_token or session_token != form_token:
+            app.logger.warning(f'CSRF token invalid from {ip}')
             return render_template('login.html', error='CSRF token 无效，请刷新页面重试')
         
         password = request.form.get('password', '')
@@ -683,6 +701,10 @@ def create_entry():
     
     # If no date provided, try to extract from files
     if not entry_date and files:
+        # Sanitize content the same way the normal path does.
+        title = sanitize_content(title)
+        content = sanitize_content(content)
+        
         # Create a temporary entry to save files
         db = get_db()
         try:
@@ -691,7 +713,6 @@ def create_entry():
             eid = cur.lastrowid
             db.commit()
         except Exception as e:
-            db.close()
             app.logger.error(f'Database error creating entry: {e}')
             return jsonify({'error':'数据库错误'}), 500
         finally:
@@ -740,7 +761,6 @@ def create_entry():
         eid = cur.lastrowid
         db.commit()
     except Exception as e:
-        db.close()
         app.logger.error(f'Database error creating entry: {e}')
         return jsonify({'error':'数据库错误'}), 500
     finally:
@@ -838,11 +858,13 @@ def update_entry(eid):
     
     db = get_db()
     try:
+        exists = db.execute('SELECT 1 FROM entries WHERE id=?', (eid,)).fetchone()
+        if not exists:
+            return jsonify({'error':'日记不存在'}), 404
         db.execute('UPDATE entries SET title=?, content=?, entry_date=? WHERE id=?',
                    (title, content, entry_date, eid))
         db.commit()
     except Exception as e:
-        db.close()
         app.logger.error(f'Database error updating entry {eid}: {e}')
         return jsonify({'error':'数据库错误'}), 500
     finally:
@@ -857,7 +879,7 @@ def upload_media(eid):
     # CSRF validation
     if not validate_csrf():
         return jsonify({'error':'CSRF token 无效'}), 403
-    count = save_uploaded_files(eid, request.files.getlist('media'))
+    count, _ = save_uploaded_files(eid, request.files.getlist('media'))
     return jsonify({'success':True, 'uploaded':count})
 
 @app.route('/api/media/<int:mid>', methods=['DELETE'])
@@ -873,16 +895,21 @@ def delete_media(mid):
     try:
         m = db.execute('SELECT * FROM media WHERE id=?', (mid,)).fetchone()
         if m:
-            fpath = os.path.join(app.config['UPLOAD_FOLDER'], m['filepath'])
-            if os.path.exists(fpath):
-                try:
-                    os.remove(fpath)
-                except Exception as e:
-                    app.logger.error(f'Error deleting file {fpath}: {e}')
+            paths = {m['filepath']}
+            if m['poster']:
+                paths.add(m['poster'])
+            base, _ = os.path.splitext(m['filepath'])
+            paths.add(base + '_thumb.jpg')
+            for rel in paths:
+                fpath = os.path.join(app.config['UPLOAD_FOLDER'], rel)
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception as e:
+                        app.logger.error(f'Error deleting file {fpath}: {e}')
             db.execute('DELETE FROM media WHERE id=?', (mid,))
             db.commit()
     except Exception as e:
-        db.close()
         app.logger.error(f'Database error deleting media {mid}: {e}')
         return jsonify({'error':'数据库错误'}), 500
     finally:

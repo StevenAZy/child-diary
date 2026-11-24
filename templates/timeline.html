@@ -112,7 +112,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
           {% endif %}
           <span class="date">{{ entry.entry_date }}</span>
           <h3>{{ entry.title }}</h3>
-          <p>{{ entry.content | replace('\n', '<br>') | safe }}</p>
+          <p>{{ entry.content | nl2br }}</p>
         </div>
       </div>
       <div class="center"><div class="dot"></div></div>
@@ -178,7 +178,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
           {% endif %}
           <span class="date">{{ entry.entry_date }}</span>
           <h3>{{ entry.title }}</h3>
-          <p>{{ entry.content | replace('\n', '<br>') | safe }}</p>
+          <p>{{ entry.content | nl2br }}</p>
         </div>
       </div>
     </div>
