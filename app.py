@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 try:
     from pillow_heif import register_heif_opener
@@ -25,6 +26,11 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'uploads')
 app.config['DATABASE'] = os.path.join(BASE_DIR, 'diary.db')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
+# When running behind a reverse proxy (e.g. Cloudflare Tunnel), trust its
+# X-Forwarded-* headers so remote_addr / is_secure are reported correctly.
+if os.environ.get('TRUST_PROXY'):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 def get_or_create_secret_key():
     """Get secret key from environment or generate and persist one"""
@@ -135,34 +141,43 @@ VIDEO_EXT = {'mp4','webm','mov'}
 
 # Magic bytes for file type validation
 FILE_SIGNATURES = {
-    'image/png': [b'\x89PNG\r\n\x1a\n'],
-    'image/jpeg': [b'\xff\xd8\xff'],
-    'image/gif': [b'GIF87a', b'GIF89a'],
-    'image/heic': [b'\x00\x00\x00'],  # HEIC files start with ftyp box
-    'video/mp4': [b'\x00\x00\x00', b'ftyp'],  # MP4/MOV files
-    'video/webm': [b'\x1a\x45\xdf\xa3'],  # WebM/MKV
+    'png': [b'\x89PNG\r\n\x1a\n'],
+    'jpg': [b'\xff\xd8\xff'],
+    'jpeg': [b'\xff\xd8\xff'],
+    'gif': [b'GIF87a', b'GIF89a'],
+    'webm': [b'\x1a\x45\xdf\xa3'],
 }
+
+# ISO Base Media files (HEIC/HEIF and MP4/MOV) start with a 4-byte size field,
+# then 'ftyp', then a 4-byte "major brand" identifying the container format.
+HEIC_BRANDS = {b'heic', b'heix', b'heif', b'heim', b'heis', b'hevx', b'hevm', b'mif1', b'msf1'}
+MP4_BRANDS = {b'isom', b'iso2', b'avc1', b'mp41', b'mp42', b'qt  ', b'M4V ', b'M4A ', b'3gp4', b'3gp5'}
 
 def allowed_file(fn):
     return '.' in fn and fn.rsplit('.',1)[1].lower() in ALLOWED_EXT
 
+def _ftyp_brand(file_data):
+    """Return the major brand of an ISO BMFF file, or None if not ftyp-based."""
+    if len(file_data) < 12 or file_data[4:8] != b'ftyp':
+        return None
+    return file_data[8:12]
+
 def validate_file_content(file_data, expected_ext):
-    """Validate file content matches expected type using magic bytes"""
+    """Validate file content matches expected type using magic bytes."""
     if not file_data or len(file_data) < 8:
         return False
     
-    # Check magic bytes based on extension
-    if expected_ext in ('png',):
-        return file_data.startswith(b'\x89PNG')
-    elif expected_ext in ('jpg', 'jpeg'):
-        return file_data.startswith(b'\xff\xd8\xff')
-    elif expected_ext in ('gif',):
-        return file_data.startswith(b'GIF87a') or file_data.startswith(b'GIF89a')
-    elif expected_ext in ('mp4', 'mov', 'heic', 'heif'):
-        # These files start with an ftyp box (size + 'ftyp')
-        return len(file_data) > 8 and b'ftyp' in file_data[:20]
-    elif expected_ext in ('webm',):
-        return file_data.startswith(b'\x1a\x45\xdf\xa3')
+    expected_ext = (expected_ext or '').lower()
+    
+    if expected_ext in FILE_SIGNATURES:
+        signatures = FILE_SIGNATURES[expected_ext]
+        return any(file_data.startswith(sig) for sig in signatures)
+    
+    if expected_ext in ('heic', 'heif'):
+        return _ftyp_brand(file_data) in HEIC_BRANDS
+    
+    if expected_ext in ('mp4', 'mov'):
+        return _ftyp_brand(file_data) in MP4_BRANDS
     
     # Unknown extension, allow by default
     return True
@@ -189,7 +204,7 @@ def extract_image_date(file_path):
         img = Image.open(file_path)
         
         # Try to get EXIF data
-        exif_data = img._getexif()
+        exif_data = img.getexif()
         if exif_data:
             # EXIF tag 36867 is DateTimeOriginal (capture time)
             # EXIF tag 306 is DateTime
@@ -411,6 +426,7 @@ def generate_thumbnail(src_path, thumb_path, size=400):
 def get_db():
     db = sqlite3.connect(app.config['DATABASE'])
     db.row_factory = sqlite3.Row
+    db.execute('PRAGMA foreign_keys = ON')
     return db
 
 def init_db():
@@ -606,10 +622,11 @@ def save_uploaded_files(eid, files):
 def timeline():
     db = get_db()
     entries = db.execute('SELECT * FROM entries ORDER BY entry_date ASC, id ASC').fetchall()
-    result = []
-    for e in entries:
-        media = db.execute('SELECT * FROM media WHERE entry_id=?', (e['id'],)).fetchall()
-        result.append({'entry': e, 'media': media})
+    media_rows = db.execute('SELECT * FROM media ORDER BY id ASC').fetchall()
+    media_by_entry = {}
+    for m in media_rows:
+        media_by_entry.setdefault(m['entry_id'], []).append(m)
+    result = [{'entry': e, 'media': media_by_entry.get(e['id'], [])} for e in entries]
     db.close()
     return render_template('timeline.html', entries=result, logged_in=session.get('auth'))
 
@@ -641,6 +658,7 @@ def login():
         if check_password_hash(ADMIN_PASSWORD_HASH, password):
             # Successful login - clear attempts
             login_attempts.pop(ip, None)
+            session.clear()  # Rotate session to prevent session fixation
             session['auth'] = True
             session.permanent = True  # Session expires after 30 days by default
             app.logger.info(f'Successful login from {ip}')
@@ -695,6 +713,9 @@ def create_entry():
     
     if len(title) > 200:
         return jsonify({'error':'标题过长（最多200字）'}), 400
+    
+    if len(content) > 100000:
+        return jsonify({'error':'内容过长（最多100000字）'}), 400
     
     # Save files first to extract dates
     files = request.files.getlist('media')
@@ -845,6 +866,9 @@ def update_entry(eid):
     # Input validation
     if len(title) > 200:
         return jsonify({'error':'标题过长（最多200字）'}), 400
+    
+    if len(content) > 100000:
+        return jsonify({'error':'内容过长（最多100000字）'}), 400
     
     # Validate date format
     try:
