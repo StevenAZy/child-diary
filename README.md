@@ -99,7 +99,7 @@ child-diary/
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SECRET_KEY` | Flask 会话密钥 | 随机生成 |
-| `ADMIN_PASSWORD_HASH` | 管理员密码哈希 | `your-password` 的哈希 |
+| `ADMIN_PASSWORD_HASH` | 管理员密码哈希 | 无默认值，必须设置 |
 
 ### 数据库
 

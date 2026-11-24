@@ -16,6 +16,11 @@ from unittest import TestCase, main as unittest_main
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# The app ships without a default admin password, so set one for the test suite.
+from werkzeug.security import generate_password_hash
+os.environ['ADMIN_PASSWORD_HASH'] = generate_password_hash('test-password')
+os.environ['SECRET_KEY'] = 'test-secret-key'
+
 from app import app, init_db, get_db, sanitize_content, validate_file_content, allowed_file
 
 class TestConfig:
@@ -56,7 +61,7 @@ class BaseTestCase(TestCase):
         os.unlink(self.db_path)
         shutil.rmtree(self.upload_dir)
     
-    def login(self, password='your-password'):
+    def login(self, password='test-password'):
         """Helper to login."""
         # First get the login page to establish session and get CSRF token
         response = self.app.get('/login')
@@ -157,7 +162,7 @@ class TestRoutes(BaseTestCase):
     
     def test_login_success(self):
         """Test successful login."""
-        response = self.login('your-password')
+        response = self.login('test-password')
         self.assertEqual(response.status_code, 200)
         self.assertIn('写日记', response.data.decode())
     

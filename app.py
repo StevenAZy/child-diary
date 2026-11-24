@@ -8,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, session
 from werkzeug.utils import secure_filename
 from datetime import datetime
+from dotenv import load_dotenv
 
 try:
     from pillow_heif import register_heif_opener
@@ -19,6 +20,7 @@ except ImportError:
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'uploads')
 app.config['DATABASE'] = os.path.join(BASE_DIR, 'diary.db')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
@@ -113,9 +115,13 @@ LOGIN_BLOCK_TIME = 300  # 5 minutes
 # Password hashing (use werkzeug.security)
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Default password hash for 'your-password' - CHANGE THIS IN PRODUCTION!
-DEFAULT_PASSWORD_HASH = generate_password_hash('your-password')
-ADMIN_PASSWORD_HASH = os.environ.get('ADMIN_PASSWORD_HASH', DEFAULT_PASSWORD_HASH)
+# Admin password hash. No default password is shipped — it must be provided via
+# ADMIN_PASSWORD_HASH (in .env or the environment). If it is missing, admin login
+# is disabled until configured.
+ADMIN_PASSWORD_HASH = os.environ.get('ADMIN_PASSWORD_HASH')
+if not ADMIN_PASSWORD_HASH:
+    ADMIN_PASSWORD_HASH = generate_password_hash(os.urandom(32).hex())
+    app.logger.warning('ADMIN_PASSWORD_HASH is not set; admin login is disabled until configured.')
 
 ALLOWED_EXT = {'png','jpg','jpeg','gif','mp4','webm','mov','heic','heif'}
 VIDEO_EXT = {'mp4','webm','mov'}
