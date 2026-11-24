@@ -81,6 +81,10 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
   .tl-item:nth-child(even) .center{order:2}
   .tl-item:nth-child(even) .side-l{order:3}
 }
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,0.88);display:none;align-items:center;justify-content:center;z-index:1000;cursor:zoom-out}
+.lightbox.open{display:flex}
+.lightbox img{max-width:92vw;max-height:92vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5)}
+.lightbox-link{display:block;cursor:zoom-in}
 </style>
 </head>
 <body>
@@ -124,7 +128,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
             {% if m.media_type == 'video' %}
               {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
             {% else %}
-              {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+              <a class="lightbox-link" href="/uploads/{{ m.filepath }}">{% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}</a>
             {% endif %}
           {% else %}
             <div class="media-grid">
@@ -132,7 +136,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
               {% if m.media_type == 'video' %}
                 {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
               {% else %}
-                {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+                <a class="lightbox-link" href="/uploads/{{ m.filepath }}">{% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}</a>
               {% endif %}
             {% endfor %}
             </div>
@@ -151,7 +155,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
             {% if m.media_type == 'video' %}
               {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
             {% else %}
-              {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+              <a class="lightbox-link" href="/uploads/{{ m.filepath }}">{% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}</a>
             {% endif %}
           {% else %}
             <div class="media-grid">
@@ -159,7 +163,7 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
               {% if m.media_type == 'video' %}
                 {% if m.poster %}<video controls preload="metadata" poster="/uploads/{{ m.poster }}"><source src="/uploads/{{ m.filepath }}">{% else %}{% set _thumb = m.filepath.rsplit(".", 1)[0] + "_thumb.jpg" %}<video controls preload="metadata" poster="/uploads/{{ _thumb }}"><source src="/uploads/{{ m.filepath }}">{% endif %}</video>
               {% else %}
-                {% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}
+                <a class="lightbox-link" href="/uploads/{{ m.filepath }}">{% if m.poster %}<img src="/uploads/{{ m.poster }}" alt="{{ m.filename }}" loading="lazy">{% else %}<img src="/uploads/{{ m.filepath }}" alt="{{ m.filename }}" loading="lazy">{% endif %}</a>
               {% endif %}
             {% endfor %}
             </div>
@@ -191,6 +195,9 @@ body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;backgro
   </div>
 {% endif %}
 </div>
+<div id="lightbox" class="lightbox">
+  <img id="lightboxImg" src="" alt="">
+</div>
 <script>
 async function delEntry(id){
   if(!confirm('确定要删除这条日记吗？'))return;
@@ -205,6 +212,30 @@ async function delEntry(id){
   if(d.success)location.reload();
   else alert('删除失败：'+(d.error||''));
 }
+
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+function openLightbox(src){
+  lightboxImg.src = src;
+  lightbox.classList.add('open');
+}
+function closeLightbox(){
+  lightbox.classList.remove('open');
+  lightboxImg.src = '';
+}
+lightbox.addEventListener('click', function(e){
+  if(e.target === lightbox) closeLightbox();
+});
+document.addEventListener('click', function(e){
+  const link = e.target.closest('a.lightbox-link');
+  if(link){
+    e.preventDefault();
+    openLightbox(link.href);
+  }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeLightbox();
+});
 </script>
 </body>
 </html>
